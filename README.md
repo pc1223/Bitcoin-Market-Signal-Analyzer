@@ -61,7 +61,7 @@
 3. **配置环境变量**：
    在项目根目录创建 `.env` 文件，添加以下内容：
    ```env
-   COINMARKETCAP_API_KEY=91e465cf-9e4d-4cee-8570-2b0705f0730e
+   COINMARKETCAP_API_KEY=91e465cf-9e4d-4cee-8570-**********
    PROXY_URL=http://127.0.0.1:7890
    ```
    - `COINMARKETCAP_API_KEY`：CoinMarketCap Pro API 密钥（注册于 https://coinmarketcap.com/api/）。
