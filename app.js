@@ -1,18 +1,19 @@
 import axios from 'axios';
 import dayjs from 'dayjs';
-import { RSI } from 'technicalindicators';
+import { RSI, MACD, BollingerBands, OBV } from 'technicalindicators';
 import chalk from 'chalk';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import NodeCache from 'node-cache'; // 新增缓存库
-import dotenv from 'dotenv'; // 新增环境变量支持
+import NodeCache from 'node-cache';
+import dotenv from 'dotenv';
+import fs from 'fs/promises';
 
 // 加载环境变量
 dotenv.config();
 
 // 配置
 const config = {
-  COINMARKETCAP_API_KEY: process.env.COINMARKETCAP_API_KEY || '91e465cf-9e4d-4cee-8570-2b0705f0730e',
-  PROXY_URL: process.env.PROXY_URL || 'http://127.0.0.1:7890',
+  COINMARKETCAP_API_KEY: process.env.COINMARKETCAP_API_KEY,
+  PROXY_URL: process.env.PROXY_URL,
   CACHE_TTL: 300, // 缓存5分钟
   REQUEST_TIMEOUT: 10000, // 请求超时10秒
 };
@@ -36,13 +37,82 @@ const axiosInstance = axios.create({
   proxy: false,
 });
 
-// 计算 RSI
+// 技术指标计算
 function calculateRSI(closes, period = 14) {
   try {
     const rsi = RSI.calculate({ values: closes, period }).slice(-1)[0];
     return Number.isFinite(rsi) ? rsi : null;
   } catch (error) {
     console.error(chalk.red('RSI计算失败:', error.message));
+    return null;
+  }
+}
+
+function calculateMACD(closes) {
+  try {
+    const macd = MACD.calculate({
+      values: closes,
+      fastPeriod: 12,
+      slowPeriod: 26,
+      signalPeriod: 9,
+    }).slice(-1)[0];
+    return {
+      histogram: macd.histogram,
+      signal: macd.signal,
+      MACD: macd.MACD,
+      trend: macd.histogram > 0 ? '看涨' : '看跌',
+    };
+  } catch (error) {
+    console.error(chalk.red('MACD计算失败:', error.message));
+    return null;
+  }
+}
+
+function calculateBollingerBands(closes, period = 20, stdDev = 2) {
+  try {
+    const bb = BollingerBands.calculate({ period, stdDev, values: closes }).slice(-1)[0];
+    const latestClose = closes.at(-1);
+    const bandwidth = ((bb.upper - bb.lower) / bb.middle) * 100;
+    let position = '中性';
+    if (latestClose > bb.upper) position = '超买';
+    else if (latestClose < bb.lower) position = '超卖';
+    return { upper: bb.upper, middle: bb.middle, lower: bb.lower, bandwidth, position };
+  } catch (error) {
+    console.error(chalk.red('布林带计算失败:', error.message));
+    return null;
+  }
+}
+
+function calculateOBV(closes, volumes) {
+  try {
+    const obv = OBV.calculate({ close: closes, volume: volumes }).slice(-1)[0];
+    const prevObv = OBV.calculate({ close: closes, volume: volumes }).slice(-2)[0];
+    return { value: obv, trend: obv > prevObv ? '上升' : '下降' };
+  } catch (error) {
+    console.error(chalk.red('OBV计算失败:', error.message));
+    return null;
+  }
+}
+
+function calculateVWAP(closes, volumes) {
+  try {
+    const sumPriceVolume = closes.reduce((sum, price, i) => sum + price * volumes[i], 0);
+    const sumVolume = volumes.reduce((sum, vol) => sum + vol, 0);
+    const vwap = sumPriceVolume / sumVolume;
+    const latestClose = closes.at(-1);
+    return { value: vwap, position: latestClose > vwap ? '高于VWAP' : '低于VWAP' };
+  } catch (error) {
+    console.error(chalk.red('VWAP计算失败:', error.message));
+    return null;
+  }
+}
+
+function calculateSMA(closes, period) {
+  try {
+    const sum = closes.slice(-period).reduce((sum, price) => sum + price, 0);
+    return sum / period;
+  } catch (error) {
+    console.error(chalk.red(`SMA(${period})计算失败:`, error.message));
     return null;
   }
 }
@@ -57,18 +127,9 @@ async function getFearGreedIndex() {
     const res = await axiosInstance.get('https://pro-api.coinmarketcap.com/v3/fear-and-greed/latest', {
       headers: { 'X-CMC_PRO_API_KEY': config.COINMARKETCAP_API_KEY },
     });
-
     const data = res.data?.data;
-    if (!data?.value || !data?.value_classification) {
-      throw new Error('无效的Fear & Greed数据');
-    }
-
-    const result = {
-      value: data.value,
-      classification: data.value_classification,
-      updateTime: data.update_time,
-    };
-
+    if (!data?.value || !data?.value_classification) throw new Error('无效的Fear & Greed数据');
+    const result = { value: data.value, classification: data.value_classification, updateTime: data.update_time };
     cache.set(cacheKey, result);
     return result;
   } catch (error) {
@@ -85,20 +146,11 @@ async function getBitcoinPriceData() {
 
   try {
     const url = 'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart';
-    const params = {
-      vs_currency: 'usd',
-      days: 30,
-      interval: 'daily',
-    };
-
+    const params = { vs_currency: 'usd', days: 200, interval: 'daily' };
     const { data } = await axiosInstance.get(url, { params });
-    if (!data?.prices?.length || !data?.total_volumes?.length) {
-      throw new Error('无效的CoinGecko数据');
-    }
-
+    if (!data?.prices?.length || !data?.total_volumes?.length) throw new Error('无效的CoinGecko数据');
     const closes = data.prices.map(([_, price]) => price);
     const volumes = data.total_volumes.map(([_, vol]) => vol);
-
     const result = { closes, volumes };
     cache.set(cacheKey, result);
     return result;
@@ -108,43 +160,123 @@ async function getBitcoinPriceData() {
   }
 }
 
+// 综合评估
+function evaluateSignals(fg, rsi, macd, bb, obv, vwap, sma50, sma200) {
+  let score = 0;
+  const signals = [];
+
+  // Fear & Greed
+  if (fg) {
+    if (fg.value < 20) { score += 2; signals.push('极度恐惧（强烈买入）'); }
+    else if (fg.value < 40) { score += 1; signals.push('恐惧（逐步买入）'); }
+    else if (fg.value > 80) { score -= 2; signals.push('极度贪婪（强烈卖出）'); }
+    else if (fg.value > 60) { score -= 1; signals.push('贪婪（逐步卖出）'); }
+  }
+
+  // RSI
+  if (rsi) {
+    if (rsi < 30) { score += 1; signals.push('RSI超卖（买入）'); }
+    else if (rsi > 70) { score -= 1; signals.push('RSI超买（卖出）'); }
+  }
+
+  // MACD
+  if (macd) {
+    if (macd.histogram > 0) { score += 1; signals.push('MACD看涨'); }
+    else { score -= 1; signals.push('MACD看跌'); }
+  }
+
+  // Bollinger Bands
+  if (bb) {
+    if (bb.position === '超卖') { score += 1; signals.push('布林带超卖（买入）'); }
+    else if (bb.position === '超买') { score -= 1; signals.push('布林带超买（卖出）'); }
+  }
+
+  // OBV
+  if (obv) {
+    if (obv.trend === '上升') { score += 0.5; signals.push('OBV上升（买压增加）'); }
+    else { score -= 0.5; signals.push('OBV下降（卖压增加）'); }
+  }
+
+  // VWAP
+  if (vwap) {
+    if (vwap.position === '高于VWAP') { score += 0.5; signals.push('价格高于VWAP（看涨）'); }
+    else { score -= 0.5; signals.push('价格低于VWAP（看跌）'); }
+  }
+
+  // SMA
+  if (sma50 && sma200) {
+    if (sma50 > sma200) { score += 0.8; signals.push('50日SMA高于200日SMA（金叉，看涨）'); }
+    else { score -= 0.8; signals.push('50日SMA低于200日SMA（死叉，看跌）'); }
+  }
+
+  // 综合建议
+  let suggestion = '观望';
+  if (score > 2.3) suggestion = '强烈买入';
+  else if (score > 0.7) suggestion = '逐步买入';
+  else if (score < -2.3) suggestion = '强烈卖出';
+  else if (score < -0.7) suggestion = '逐步卖出';
+
+  return { score, suggestion, signals };
+}
+
 // 输出报告
 async function generateReport() {
   try {
     // 并行获取数据
-    const [fg, priceData] = await Promise.all([getFearGreedIndex(), getBitcoinPriceData()]);
+    const [fg, priceData] = await Promise.all([
+      getFearGreedIndex(),
+      getBitcoinPriceData(),
+    ]);
 
     if (!fg || !priceData) {
-      console.error(chalk.red('无法生成报告：数据获取失败'));
+      console.error(chalk.red('无法生成报告：核心数据获取失败'));
       return;
     }
 
     const { closes, volumes } = priceData;
     const rsi = calculateRSI(closes);
-
-    const classificationCN = classificationMap[fg.classification] || fg.classification;
+    const macd = calculateMACD(closes);
+    const bb = calculateBollingerBands(closes);
+    const obv = calculateOBV(closes, volumes);
+    const vwap = calculateVWAP(closes, volumes);
+    const sma50 = calculateSMA(closes, 50);
+    const sma200 = calculateSMA(closes, 200);
     const latestClose = closes.at(-1);
     const latestVolume = volumes.at(-1);
 
-    // 策略建议
-    let suggestion = '观望';
-    if (fg.value < 20 || rsi < 30) suggestion = '强烈买入';
-    else if (fg.value < 40 || rsi < 40) suggestion = '逐步买入';
-    else if (fg.value > 80 || rsi > 75) suggestion = '强烈卖出';
-    else if (fg.value > 60 || rsi > 65) suggestion = '逐步卖出';
+    // 综合评估
+    const { score, suggestion, signals } = evaluateSignals(fg, rsi, macd, bb, obv, vwap, sma50, sma200);
 
-    // 输出分析
-    console.log(chalk.green('\n【恐慌与贪婪指数分析】'));
-    console.log(`情绪值：${fg.value}（${classificationCN}）`);
-    console.log(`更新时间：${dayjs(fg.updateTime).format('YYYY-MM-DD HH:mm:ss')}`);
+    // 输出报告
+    console.log(chalk.green('\n【恐慌与贪婪指数】'));
+    console.log(`情绪值：${fg?.value || 'N/A'}（${fg ? classificationMap[fg.classification] || fg.classification : 'N/A'}）`);
+    console.log(`更新时间：${fg ? dayjs(fg.updateTime).format('YYYY-MM-DD HH:mm:ss') : 'N/A'}`);
 
-    console.log(chalk.cyan('\n【技术指标分析】'));
+    console.log(chalk.cyan('\n【技术指标】'));
     console.log(`RSI(14)：${rsi ? rsi.toFixed(2) : 'N/A'} → ${rsi < 30 ? '超卖' : rsi > 70 ? '超买' : '中性'}`);
+    console.log(`MACD：${macd ? macd.trend : 'N/A'} (Histogram: ${macd?.histogram?.toFixed(2) || 'N/A'})`);
+    console.log(`布林带：${bb ? bb.position : 'N/A'} (带宽: ${bb?.bandwidth?.toFixed(2) || 'N/A'}%)`);
+    console.log(`OBV：${obv ? obv.trend : 'N/A'} (值: ${obv?.value?.toFixed(0) || 'N/A'})`);
+    console.log(`VWAP：${vwap ? vwap.position : 'N/A'} (值: $${vwap?.value?.toFixed(2) || 'N/A'})`);
+    console.log(`50日SMA：$${sma50 ? sma50.toFixed(2) : 'N/A'}`);
+    console.log(`200日SMA：$${sma200 ? sma200.toFixed(2) : 'N/A'}`);
     console.log(`当前价格：$${latestClose.toFixed(2)}`);
     console.log(`当前成交量：$${(latestVolume / 1e9).toFixed(2)}B`);
 
-    console.log(chalk.yellow('\n【综合建议】'));
+    console.log(chalk.yellow('\n【综合评估】'));
+    console.log(`信号得分：${score.toFixed(2)}`);
+    console.log(`信号详情：${signals.length ? signals.join(' | ') : '无'}`);
     console.log(`建议操作：${suggestion}`);
+
+    // 导出到文件
+    const report = {
+      timestamp: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      fearGreed: fg,
+      technical: { rsi, macd, bb, obv, vwap, sma50, sma200, price: latestClose, volume: latestVolume },
+      evaluation: { score, suggestion, signals },
+    };
+    await fs.writeFile('report.json', JSON.stringify(report, null, 2));
+    console.log(chalk.gray('\n报告已导出到 report.json'));
   } catch (error) {
     console.error(chalk.red('生成报告失败:', error.message));
   }
