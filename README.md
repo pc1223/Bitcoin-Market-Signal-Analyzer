@@ -212,20 +212,3 @@ fear-and-greed/
      const schedule = require('node-schedule');
      schedule.scheduleJob('0 9 * * *', generateReport);
      ```
-
-## 贡献
-
-欢迎提交 Issue 或 Pull Request，建议改进：
-- 添加新指标或数据源。
-- 优化 API 请求或缓存策略。
-- 增强报告输出（如 CSV、可视化）。
-
-## 许可证
-
-MIT License
-
-## 联系方式
-
-如有问题，请联系：
-- 邮箱：example@email.com（请替换为你的邮箱）
-- 或通过 GitHub Issue 反馈。
