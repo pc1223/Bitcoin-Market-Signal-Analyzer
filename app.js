@@ -12,7 +12,6 @@ dotenv.config();
 
 // 配置
 const config = {
-  COINMARKETCAP_API_KEY: process.env.COINMARKETCAP_API_KEY,
   PROXY_URL: process.env.PROXY_URL,
   CACHE_TTL: 300, // 缓存5分钟
   REQUEST_TIMEOUT: 10000, // 请求超时10秒
@@ -117,23 +116,56 @@ function calculateSMA(closes, period) {
   }
 }
 
-// 获取 Fear & Greed 指数
+// 新增：计算 Pi Cycle Top
+async function calculatePiCycleTop() {
+  const cacheKey = 'pi_cycle_top';
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    // 添加延时以应对 CoinGecko 限速
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const { data } = await axiosInstance.get(
+      'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart',
+      { params: { vs_currency: 'usd', days: 365, interval: 'daily' } }
+    );
+    if (!data?.prices?.length) throw new Error('无效的 CoinGecko 数据');
+    const closes = data.prices.map(([_, price]) => price);
+    if (closes.length < 350) throw new Error('数据不足以计算 350DMA');
+    const sma111 = calculateSMA(closes, 111);
+    const sma350 = calculateSMA(closes, 350) * 2;
+    const result = {
+      sma111,
+      sma350,
+      isTop: sma111 >= sma350,
+      timestamp: dayjs(data.prices.at(-1)[0]).format('YYYY-MM-DD')
+    };
+    cache.set(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error(chalk.red('Pi Cycle Top 计算失败:', error.message));
+    return null;
+  }
+}
+
+// 获取 Fear & Greed 指数（修复为 Alternative.me）
 async function getFearGreedIndex() {
   const cacheKey = 'fear_greed_index';
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
   try {
-    const res = await axiosInstance.get('https://pro-api.coinmarketcap.com/v3/fear-and-greed/latest', {
-      headers: { 'X-CMC_PRO_API_KEY': config.COINMARKETCAP_API_KEY },
-    });
-    const data = res.data?.data;
-    if (!data?.value || !data?.value_classification) throw new Error('无效的Fear & Greed数据');
-    const result = { value: data.value, classification: data.value_classification, updateTime: data.update_time };
+    const res = await axiosInstance.get('https://api.alternative.me/fng/?limit=1');
+    const data = res.data.data[0];
+    const result = {
+      value: parseInt(data.value),
+      classification: data.value_classification,
+      updateTime: data.timestamp * 1000
+    };
     cache.set(cacheKey, result);
     return result;
   } catch (error) {
-    console.error(chalk.red('获取Fear & Greed指数失败:', error.message));
+    console.error(chalk.red('获取 Fear & Greed 指数失败:', error.message));
     return null;
   }
 }
@@ -145,23 +177,25 @@ async function getBitcoinPriceData() {
   if (cached) return cached;
 
   try {
+    // 添加延时
+    await new Promise(resolve => setTimeout(resolve, 1200));
     const url = 'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart';
     const params = { vs_currency: 'usd', days: 200, interval: 'daily' };
     const { data } = await axiosInstance.get(url, { params });
-    if (!data?.prices?.length || !data?.total_volumes?.length) throw new Error('无效的CoinGecko数据');
+    if (!data?.prices?.length || !data?.total_volumes?.length) throw new Error('无效的 CoinGecko 数据');
     const closes = data.prices.map(([_, price]) => price);
     const volumes = data.total_volumes.map(([_, vol]) => vol);
     const result = { closes, volumes };
     cache.set(cacheKey, result);
     return result;
   } catch (error) {
-    console.error(chalk.red('获取CoinGecko数据失败:', error.message));
+    console.error(chalk.red('获取 CoinGecko 数据失败:', error.message));
     return null;
   }
 }
 
-// 综合评估
-function evaluateSignals(fg, rsi, macd, bb, obv, vwap, sma50, sma200) {
+// 综合评估（新增 Pi Cycle Top）
+function evaluateSignals(fg, rsi, macd, bb, obv, vwap, sma50, sma200, piCycle) {
   let score = 0;
   const signals = [];
 
@@ -175,14 +209,14 @@ function evaluateSignals(fg, rsi, macd, bb, obv, vwap, sma50, sma200) {
 
   // RSI
   if (rsi) {
-    if (rsi < 30) { score += 1; signals.push('RSI超卖（买入）'); }
-    else if (rsi > 70) { score -= 1; signals.push('RSI超买（卖出）'); }
+    if (rsi < 30) { score += 1; signals.push('RSI 超卖（买入）'); }
+    else if (rsi > 70) { score -= 1; signals.push('RSI 超买（卖出）'); }
   }
 
   // MACD
   if (macd) {
-    if (macd.histogram > 0) { score += 1; signals.push('MACD看涨'); }
-    else { score -= 1; signals.push('MACD看跌'); }
+    if (macd.histogram > 0) { score += 1; signals.push('MACD 看涨'); }
+    else { score -= 1; signals.push('MACD 看跌'); }
   }
 
   // Bollinger Bands
@@ -193,20 +227,26 @@ function evaluateSignals(fg, rsi, macd, bb, obv, vwap, sma50, sma200) {
 
   // OBV
   if (obv) {
-    if (obv.trend === '上升') { score += 0.5; signals.push('OBV上升（买压增加）'); }
-    else { score -= 0.5; signals.push('OBV下降（卖压增加）'); }
+    if (obv.trend === '上升') { score += 0.5; signals.push('OBV 上升（买压增加）'); }
+    else { score -= 0.5; signals.push('OBV 下降（卖压增加）'); }
   }
 
   // VWAP
   if (vwap) {
-    if (vwap.position === '高于VWAP') { score += 0.5; signals.push('价格高于VWAP（看涨）'); }
-    else { score -= 0.5; signals.push('价格低于VWAP（看跌）'); }
+    if (vwap.position === '高于VWAP') { score += 0.5; signals.push('价格高于 VWAP（看涨）'); }
+    else { score -= 0.5; signals.push('价格低于 VWAP（看跌）'); }
   }
 
   // SMA
   if (sma50 && sma200) {
-    if (sma50 > sma200) { score += 0.8; signals.push('50日SMA高于200日SMA（金叉，看涨）'); }
-    else { score -= 0.8; signals.push('50日SMA低于200日SMA（死叉，看跌）'); }
+    if (sma50 > sma200) { score += 0.8; signals.push('50日 SMA 高于 200日 SMA（金叉，看涨）'); }
+    else { score -= 0.8; signals.push('50日 SMA 低于 200日 SMA（死叉，看跌）'); }
+  }
+
+  // Pi Cycle Top
+  if (piCycle && piCycle.isTop) {
+    score -= 1.5;
+    signals.push('Pi Cycle Top 触发（强烈卖出）');
   }
 
   // 综合建议
@@ -223,9 +263,10 @@ function evaluateSignals(fg, rsi, macd, bb, obv, vwap, sma50, sma200) {
 async function generateReport() {
   try {
     // 并行获取数据
-    const [fg, priceData] = await Promise.all([
+    const [fg, priceData, piCycle] = await Promise.all([
       getFearGreedIndex(),
       getBitcoinPriceData(),
+      calculatePiCycleTop()
     ]);
 
     if (!fg || !priceData) {
@@ -245,7 +286,7 @@ async function generateReport() {
     const latestVolume = volumes.at(-1);
 
     // 综合评估
-    const { score, suggestion, signals } = evaluateSignals(fg, rsi, macd, bb, obv, vwap, sma50, sma200);
+    const { score, suggestion, signals } = evaluateSignals(fg, rsi, macd, bb, obv, vwap, sma50, sma200, piCycle);
 
     // 输出报告
     console.log(chalk.green('\n【恐慌与贪婪指数】'));
@@ -258,10 +299,15 @@ async function generateReport() {
     console.log(`布林带：${bb ? bb.position : 'N/A'} (带宽: ${bb?.bandwidth?.toFixed(2) || 'N/A'}%)`);
     console.log(`OBV：${obv ? obv.trend : 'N/A'} (值: ${obv?.value?.toFixed(0) || 'N/A'})`);
     console.log(`VWAP：${vwap ? vwap.position : 'N/A'} (值: $${vwap?.value?.toFixed(2) || 'N/A'})`);
-    console.log(`50日SMA：$${sma50 ? sma50.toFixed(2) : 'N/A'}`);
-    console.log(`200日SMA：$${sma200 ? sma200.toFixed(2) : 'N/A'}`);
+    console.log(`50日 SMA：$${sma50 ? sma50.toFixed(2) : 'N/A'}`);
+    console.log(`200日 SMA：$${sma200 ? sma200.toFixed(2) : 'N/A'}`);
     console.log(`当前价格：$${latestClose.toFixed(2)}`);
     console.log(`当前成交量：$${(latestVolume / 1e9).toFixed(2)}B`);
+
+    console.log(chalk.magenta('\n【Pi Cycle Top】'));
+    console.log(`111日 SMA：$${piCycle?.sma111?.toFixed(2) || 'N/A'}`);
+    console.log(`350日 SMA×2：$${piCycle?.sma350?.toFixed(2) || 'N/A'}`);
+    console.log(`信号：${piCycle?.isTop ? '市场可能过热（卖出）' : '未达顶部'}`);
 
     console.log(chalk.yellow('\n【综合评估】'));
     console.log(`信号得分：${score.toFixed(2)}`);
@@ -273,6 +319,7 @@ async function generateReport() {
       timestamp: dayjs().format('YYYY-MM-DD HH:mm:ss'),
       fearGreed: fg,
       technical: { rsi, macd, bb, obv, vwap, sma50, sma200, price: latestClose, volume: latestVolume },
+      piCycle,
       evaluation: { score, suggestion, signals },
     };
     await fs.writeFile('report.json', JSON.stringify(report, null, 2));
