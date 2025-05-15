@@ -1,9 +1,9 @@
-name: Update Market Signal Report
+name: 更新市场信号报告
 
 on:
   schedule:
-    - cron: '0 */3 * * *'  # Run every 3 hours
-  workflow_dispatch:  # Allow manual trigger
+    - cron: '0 */3 * * *'  # 每3小时运行一次
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
   update-report:
@@ -17,56 +17,56 @@ jobs:
         fetch-depth: 1
         token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set up Node.js
+    - name: 设置 Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    - name: Install dependencies
+    - name: 安装依赖
       run: npm install
 
-    - name: Run market signal analyzer
+    - name: 运行市场信号分析器
       run: node app.js
 
-    - name: Update README with report
+    - name: 更新 README 与报告
       run: |
-        # Read the report.json and format it as a table
-        echo "# Bitcoin Market Signal Report" > README.md
+        # 读取 report.json 并将其格式化为表格
+        echo "# 比特币市场信号报告" > README.md
         echo "" >> README.md
-        echo "Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> README.md
+        echo "最后更新时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> README.md
         echo "" >> README.md
-        echo "## Market Signals" >> README.md
-        echo "" >> README.md
-        
-        # Extract and format data from report.json
-        echo "### Fear & Greed Index" >> README.md
-        echo "- Value: $(jq -r '.fearGreed.value' report.json)" >> README.md
-        echo "- Classification: $(jq -r '.fearGreed.classification' report.json)" >> README.md
+        echo "## 市场信号" >> README.md
         echo "" >> README.md
         
-        echo "### Technical Indicators" >> README.md
-        echo "- Price: $$(jq -r '.technical.price' report.json)" >> README.md
+        # 从 report.json 提取并格式化数据
+        echo "### 恐惧与贪婪指数" >> README.md
+        echo "- 值: $(jq -r '.fearGreed.value' report.json)" >> README.md
+        echo "- 分类: $(jq -r '.fearGreed.classification' report.json)" >> README.md
+        echo "" >> README.md
+        
+        echo "### 技术指标" >> README.md
+        echo "- 价格: $$(jq -r '.technical.price' report.json)" >> README.md
         echo "- RSI: $(jq -r '.technical.rsi' report.json)" >> README.md
-        echo "- MACD Trend: $(jq -r '.technical.macd.trend' report.json)" >> README.md
-        echo "- Volume: $$(jq -r '.technical.volume' report.json)" >> README.md
+        echo "- MACD 趋势: $(jq -r '.technical.macd.trend' report.json)" >> README.md
+        echo "- 交易量: $$(jq -r '.technical.volume' report.json)" >> README.md
         echo "" >> README.md
         
-        echo "### Market Evaluation" >> README.md
-        echo "- Score: $(jq -r '.evaluation.score' report.json)" >> README.md
-        echo "- Suggestion: $(jq -r '.evaluation.suggestion' report.json)" >> README.md
+        echo "### 市场评估" >> README.md
+        echo "- 分数: $(jq -r '.evaluation.score' report.json)" >> README.md
+        echo "- 建议: $(jq -r '.evaluation.suggestion' report.json)" >> README.md
         echo "" >> README.md
         
-        echo "### Signals" >> README.md
+        echo "### 信号" >> README.md
         jq -r '.evaluation.signals[]' report.json | while read -r signal; do
           echo "- $signal" >> README.md
         done
 
-    - name: Commit and push changes
+    - name: 提交并推送更改
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add README.md
-        git commit -m "Update market signal report" || exit 0
-        git push 
+        git commit -m "更新市场信号报告" || exit 0
+        git push
