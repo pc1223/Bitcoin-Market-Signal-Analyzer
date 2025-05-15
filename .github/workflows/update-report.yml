@@ -30,43 +30,14 @@ jobs:
 
     - name: 更新 README 与报告
       run: |
-        # 读取 report.json 并将其格式化为表格
+        # 创建 README 标题
         echo "# 比特币市场信号报告" > README.md
         echo "" >> README.md
         echo "最后更新时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> README.md
         echo "" >> README.md
-        echo "## 市场信号" >> README.md
-        echo "" >> README.md
-        
-        # 从 report.json 提取并格式化数据
-        echo "### 恐惧与贪婪指数" >> README.md
-        echo "- 值: $(jq -r '.fearGreed.value' report.json)" >> README.md
-        echo "- 分类: $(jq -r '.fearGreed.classification' report.json)" >> README.md
-        echo "" >> README.md
-        
-        echo "### 技术指标" >> README.md
-        echo "- 价格: $$(jq -r '.technical.price' report.json)" >> README.md
-        echo "- RSI: $(jq -r '.technical.rsi' report.json)" >> README.md
-        echo "- MACD 趋势: $(jq -r '.technical.macd.trend' report.json)" >> README.md
-        echo "- 交易量: $$(jq -r '.technical.volume' report.json)" >> README.md
-        echo "" >> README.md
-        
-        echo "### 市场评估" >> README.md
-        echo "- 分数: $(jq -r '.evaluation.score' report.json)" >> README.md
-        echo "- 建议: $(jq -r '.evaluation.suggestion' report.json)" >> README.md
-        echo "" >> README.md
-        
-        echo "### 信号" >> README.md
-        jq -r '.evaluation.signals[]' report.json | while read -r signal; do
-          echo "- $signal" >> README.md
-        done
 
-        echo "" >> README.md
-        echo "## 详细分析报告" >> README.md
-        echo "" >> README.md
-        echo '```' >> README.md
-        cat report.txt >> README.md
-        echo '```' >> README.md
+        # 将 report.txt 内容转换为 markdown 格式
+        sed 's/【\(.*\)】/## \1/' report.txt | sed 's/^[^#].*[^[:space:]]/- &/' >> README.md
 
     - name: 提交并推送更改
       env:
