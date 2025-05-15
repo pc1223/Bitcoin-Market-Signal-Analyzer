@@ -61,6 +61,13 @@ jobs:
           echo "- $signal" >> README.md
         done
 
+        echo "" >> README.md
+        echo "## 详细分析报告" >> README.md
+        echo "" >> README.md
+        echo '```' >> README.md
+        cat report.txt >> README.md
+        echo '```' >> README.md
+
     - name: 提交并推送更改
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

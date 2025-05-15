@@ -314,16 +314,39 @@ async function generateReport() {
     console.log(`信号详情：${signals.length ? signals.join(' | ') : '无'}`);
     console.log(`建议操作：${suggestion}`);
 
-    // 导出到文件
-    const report = {
-      timestamp: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-      fearGreed: fg,
-      technical: { rsi, macd, bb, obv, vwap, sma50, sma200, price: latestClose, volume: latestVolume },
-      piCycle,
-      evaluation: { score, suggestion, signals },
-    };
-    await fs.writeFile('report.json', JSON.stringify(report, null, 2));
-    console.log(chalk.gray('\n报告已导出到 report.json'));
+    // 构造文本报告内容
+    const reportText = 
+`【恐慌与贪婪指数】
+情绪值：${fg?.value || 'N/A'}（${fg ? classificationMap[fg.classification] || fg.classification : 'N/A'}）
+更新时间：${fg ? dayjs(fg.updateTime).format('YYYY-MM-DD HH:mm:ss') : 'N/A'}
+
+【技术指标】
+RSI(14)：${rsi ? rsi.toFixed(2) : 'N/A'} → ${rsi < 30 ? '超卖' : rsi > 70 ? '超买' : '中性'}
+MACD：${macd ? macd.trend : 'N/A'} (Histogram: ${macd?.histogram?.toFixed(2) || 'N/A'})
+布林带：${bb ? bb.position : 'N/A'} (带宽: ${bb?.bandwidth?.toFixed(2) || 'N/A'}%)
+OBV：${obv ? obv.trend : 'N/A'} (值: ${obv?.value?.toFixed(0) || 'N/A'})
+VWAP：${vwap ? vwap.position : 'N/A'} (值: $${vwap?.value?.toFixed(2) || 'N/A'})
+50日 SMA：$${sma50 ? sma50.toFixed(2) : 'N/A'}
+200日 SMA：$${sma200 ? sma200.toFixed(2) : 'N/A'}
+当前价格：$${latestClose.toFixed(2)}
+当前成交量：$${(latestVolume / 1e9).toFixed(2)}B
+
+【Pi Cycle Top】
+111日 SMA：$${piCycle?.sma111?.toFixed(2) || 'N/A'}
+350日 SMA×2：$${piCycle?.sma350?.toFixed(2) || 'N/A'}
+信号：${piCycle?.isTop ? '市场可能过热（卖出）' : '未达顶部'}
+
+【综合评估】
+信号得分：${score.toFixed(2)}
+信号详情：${signals.length ? signals.join(' | ') : '无'}
+建议操作：${suggestion}
+
+报告生成时间：${dayjs().format('YYYY-MM-DD HH:mm:ss')}`;
+
+    // 导出到 report.txt
+    await fs.writeFile('report.txt', reportText);
+    console.log(chalk.gray('\n报告已导出到 report.txt'));
+
   } catch (error) {
     console.error(chalk.red('生成报告失败:', error.message));
   }
