@@ -1,24 +1,24 @@
-# Bitcoin Market Signal Report
+# 比特币市场信号报告
 
-Last updated: 2025-05-15 15:29:33 UTC
+最后更新时间: 2025-05-15 15:32:25 UTC
 
-## Market Signals
+## 市场信号
 
-### Fear & Greed Index
-- Value: 70
-- Classification: Greed
+### 恐惧与贪婪指数
+- 值: 70
+- 分类: Greed
 
-### Technical Indicators
-- Price: 2002(jq -r '.technical.price' report.json)
-- RSI: 64.98
-- MACD Trend: 看涨
-- Volume: 2002(jq -r '.technical.volume' report.json)
+### 技术指标
+- 价格: 2015(jq -r '.technical.price' report.json)
+- RSI: 65.2
+- MACD 趋势: 看涨
+- 交易量: 2015(jq -r '.technical.volume' report.json)
 
-### Market Evaluation
-- Score: -0.8
-- Suggestion: 逐步卖出
+### 市场评估
+- 分数: -0.8
+- 建议: 逐步卖出
 
-### Signals
+### 信号
 - 贪婪（逐步卖出）
 - MACD 看涨
 - OBV 下降（卖压增加）
